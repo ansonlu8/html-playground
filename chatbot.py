@@ -15,38 +15,127 @@ STATUS_FILE = "bot_status.json"
 def load_json(file):
     with open(file, "r") as f: return json.load(f)
 
+# --- NEW: LIQUIDATION HELPER ---
+def execute_liquidation(symbol):
+    try:
+        trading_client.close_position(symbol)
+        return f"Done! Sold all your {symbol} positions. Huat ah! 💸"
+    except Exception as e:
+        if "position does not exist" in str(e):
+            return f"Aiya, you don't even own any {symbol} lah!"
+        return f"Error liquidating {symbol}: {e}"
+
+
+def add_to_watchlist_file(symbol):
+    try:
+        # 1. Load the dictionary
+        data = load_json(WATCHLIST_FILE)
+        
+        # 2. Get the list of symbols from the "symbols" key
+        watchlist = data.get("symbols", [])
+        
+        symbol = symbol.upper()
+        if symbol not in watchlist:
+            watchlist.append(symbol)
+            
+            # 3. Put the list back into the dictionary and save
+            data["symbols"] = watchlist
+            with open(WATCHLIST_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+            return f"Done, Boss! Added {symbol} to your watchlist. Huat ah! 🚀"
+        else:
+            return f"Aiya, {symbol} is already inside lah!"
+    except Exception as e:
+        print(f"❌ Watchlist Error: {e}")
+        return f"Failed to update watchlist: {e}"
+    
+
+# --- THE AI BRAIN LOGIC ---
+def get_shifu_response(user_input):
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    
+    system_prompt = (
+        "You are Shifu, a witty Malaysian trading expert. Use 'lah', 'aiya', and 'bro' naturally. "
+        "1. If the user asks to 'liquidate' or 'sell all', use 'ACTION_LIQUIDATE:[SYMBOL]'. "
+        "2. If the user asks to 'add [SYMBOL] to watchlist', use 'ACTION_ADD_WATCHLIST:[SYMBOL]'. " # New instruction
+        "Example: 'ACTION_ADD_WATCHLIST:AAPL'. Then follow with your funny Malaysian commentary."
+    )
+    
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ],
+        temperature=0.7,
+    )
+    return completion.choices[0].message.content
+
 # --- THE BUTTON LISTENER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     if call.data.startswith("buy_"):
-        # Split e.g., "buy_TSLA_700" -> ['buy', 'TSLA', '700']
         _, symbol, amount = call.data.split("_")
         amount = int(amount)
-        
-        bot.answer_callback_query(call.id, f"Executing ${amount} buy...")
-        
+        bot.answer_callback_query(call.id, f"Shifu is processing ${amount} of {symbol}...")
         try:
+            clean_symbol = symbol.replace("-", "/")
+            is_crypto = "/" in clean_symbol or any(x in clean_symbol for x in ["BTC", "ETH", "SOL"])
+            tif = TimeInForce.GTC if is_crypto else TimeInForce.DAY
+            
             order_data = MarketOrderRequest(
-                symbol=symbol,
-                notional=amount, 
+                symbol=clean_symbol,
+                notional=amount,
                 side=OrderSide.BUY,
-                time_in_force=TimeInForce.GTC
+                time_in_force=tif
             )
             trading_client.submit_order(order_data)
             bot.edit_message_text(f"🚀 **ORDER SUCCESS!** Bought ${amount} of {symbol}. Huat ah, Boss!", 
                                  call.message.chat.id, call.message.message_id, parse_mode='Markdown')
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"⚠️ Trade Failed: {e}")
+            bot.send_message(call.message.chat.id, f"⚠️ Trade Failed for {symbol}: {e}")
             
     elif call.data == "ignore":
         bot.answer_callback_query(call.id, "Advice ignored.")
-        bot.edit_message_text("🙈 Advice ignored. Staying patient like a master.", 
+        bot.edit_message_text("🙈 Advice ignored. Staying patient like a master.",
                              call.message.chat.id, call.message.message_id)
 
-# (Keep your existing @bot.message_handler commands below this...)
+# --- COMMAND HANDLERS ---
 @bot.message_handler(commands=['status'])
 def status(message):
     data = load_json(STATUS_FILE)
     bot.reply_to(message, f"💰 Equity: `${data['equity']}`", parse_mode='Markdown')
 
-bot.infinity_polling()
+@bot.message_handler(func=lambda message: True)
+def handle_text_messages(message):
+    user_input = message.text
+    try:
+        raw_response = get_shifu_response(user_input)
+        
+        # 1. Check for Liquidation
+        if "ACTION_LIQUIDATE:" in raw_response:
+            parts = raw_response.split("ACTION_LIQUIDATE:")
+            symbol = parts[1].split()[0].strip().replace(":", "")
+            bot.reply_to(message, execute_liquidation(symbol))
+            
+        # 2. Check for Watchlist (THIS IS THE PART YOU ARE MISSING)
+        elif "ACTION_ADD_WATCHLIST:" in raw_response:
+            parts = raw_response.split("ACTION_ADD_WATCHLIST:")
+            symbol = parts[1].split()[0].strip().replace(":", "")
+            
+            # This calls the function to write to your JSON file
+            result_msg = add_to_watchlist_file(symbol) 
+            bot.reply_to(message, result_msg)
+
+        # 3. Always show Shifu's funny reply
+        clean_msg = raw_response.split("]")[-1].strip()
+        if clean_msg:
+            bot.send_message(message.chat.id, clean_msg)
+
+    except Exception as e:
+        print(f"❌ AI Error: {e}")
+        bot.reply_to(message, "🦁 Shifu is meditating. Try again!")
+
+if __name__ == "__main__":
+    print("🦁 Shifu is awake and listening...")
+    bot.infinity_polling()
