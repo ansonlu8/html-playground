@@ -28,25 +28,22 @@ def execute_liquidation(symbol):
 
 def add_to_watchlist_file(symbol):
     try:
-        # 1. Load the dictionary
         data = load_json(WATCHLIST_FILE)
-        
-        # 2. Get the list of symbols from the "symbols" key
         watchlist = data.get("symbols", [])
         
-        symbol = symbol.upper()
-        if symbol not in watchlist:
-            watchlist.append(symbol)
-            
-            # 3. Put the list back into the dictionary and save
+        # CLEANING: Remove punctuation and force uppercase
+        import string
+        clean_symbol = symbol.strip(string.punctuation).upper()
+        
+        if clean_symbol not in watchlist:
+            watchlist.append(clean_symbol)
             data["symbols"] = watchlist
             with open(WATCHLIST_FILE, "w") as f:
                 json.dump(data, f, indent=4)
-            return f"Done, Boss! Added {symbol} to your watchlist. Huat ah! 🚀"
+            return f"Done, Boss! Added {clean_symbol} to your watchlist."
         else:
-            return f"Aiya, {symbol} is already inside lah!"
+            return f"Aiya, {clean_symbol} is already inside lah!"
     except Exception as e:
-        print(f"❌ Watchlist Error: {e}")
         return f"Failed to update watchlist: {e}"
     
 
