@@ -120,17 +120,7 @@ def run_simple_cycle(symbols):
         else:
             print(f"📉 {yf_sym} is cooling: ${last_price:.2f}")
 
-if __name__ == "__main__":
-    print("🦁 Master Engine Online (Light Mode).")
-    while True:
-        try:
-            with open("watchlist.json", "r") as f:
-                watchlist = json.load(f)["symbols"]
-            run_simple_cycle(watchlist)
-            time.sleep(600)
-        except Exception as e:
-            print(f"⚠️ Error: {e}")
-            time.sleep(60)
+
 
             # --- THE BRAIN LOOP ---
 if __name__ == "__main__":
